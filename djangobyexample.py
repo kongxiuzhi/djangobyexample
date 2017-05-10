@@ -973,7 +973,8 @@
 
 	from django.http import JsonResponse
 	from django.views.decorators.http import require_POST //require_GET 等等
-	
+
+
 
 	@login_required
 	@require_POST
@@ -1003,6 +1004,242 @@
 				});
 				
 		</script>
+	4.	Cross-Site Request Forgery in AJAX requests
+		Django allows you to set a custom X-CSRFToken header
+		in your AJAX requests with the value of the CSRF token. This allows you to set up
+		jQuery or any other JavaScript library, to automatically set the X-CSRFToken header
+		in every request.
+		In order to include the token in all requests, you need to:
+		1. Retrieve the CSRF token form the csrftoken cookie, which is set if CSRF
+		protection is active.
+		2. Send the token in the AJAX request using the X-CSRFToken header
+
+		<script src="{% static "js/jquery.mim.js" %}"></script>
+		<script src="{% static "js/jquery.cookie.mim.js" %}"></script>
+		<script>
+			var csrftoken = $.cookie('csrftoken');
+			function csrfSafeMethod(method){
+				//判断是否需要CSRF保护
+				return  (/^(GET|HEAD|OPTIONS|TRACE)$/.test(method));
+			}
+			$.ajaxSetup({
+					beforesend:function(xhr,settings){
+					if(!csrfSafeMethod(settings.type) && !this.crossDomain){
+						xhr.setRequsetHeader("X-CSRFToken",csrftoken);
+					}
+					}
+				});//添加X-CSRFToken 到cookie的csrftoken
+
+			$(document).ready(function(){
+				{% block domready %}
+				{% endblock %}
+				});
+				
+		</script>
+	5.编辑要通过AJAX的模板
+		{% with total_likes=image.users_like.count users_like=image.users_like.all %}
+		.....
+		.....
+
+		<div class="image-info">
+			<div>
+				<span class="count">
+					<span class="total">{{ total_likes }}</span>
+					like{{ total_likes|pluralize }}
+				</span>
+				//html5 中data-自定义用户的私有属性
+				<a href="#" data-id="{{ image.id }}"data-action="{% if request.user in users_like %}un{% endif %}like" class="like button">
+					{% if request.user not in users_like %}
+					Like
+					{% else %}
+					Unlike
+					{% endif %}
+				</a>
+			</div>
+			{{ image.description|linebreaks }}
+		</div>
+
+		We will send the value of both attributes in the AJAX request to the image_like
+		view. When a user clicks the like/unlike link, we need to perform the following
+		actions on the client side:
+		1. Call the AJAX view passing the image ID and the action parameters to it.
+		2. If the AJAX request is successful, update the data-action attribute of the
+			<a> HTML element with the opposite action (like / unlike), and modify its
+			display text accordingly.
+		3. Update the total number of likes that is displayed.
+		% block domready %}
+		$('a.like').click(function(e){
+				e.preventDefault();
+				$.post('{% url "images:like" %}',
+						{
+						id: $(this).data('id'),
+						action: $(this).data('action')
+						},
+						function(data){
+							if (data['status'] == 'ok'){
+								var previous_action = $('a.like').data('action');
+								// toggle data-action
+								$('a.like').data('action', previous_action == 'like' ?'unlike' : 'like');
+								// toggle link text
+								$('a.like').text(previous_action == 'like' ? 'Unlike' :'Like');
+								// update total likes
+								var previous_likes = parseInt($('span.count .total').text());
+								$('span.count .total').text(previous_action == 'like' ?previous_likes + 1 : previous_likes - 1);
+							}
+						}
+				);
+		});
+		{% endblock %}
+		This code works as follows:
+		1. We use the $('a.like') jQuery selector to fnd all <a> elements of the
+		HTML document with the class like.
+		2. We defne a handler function for the click event. This function will be
+		executed every time the user clicks the like/unlike link.
+		3. Inside the handler function we use e.preventDefault() to avoid the
+		default behavior of the <a> element. This will prevent from the link
+		taking us anywhere.
+		4. We use $.post() to perform an asynchronous POST request to the server.
+		jQuery also provides a $.get() method to perform GET requests and a
+		low-level $.ajax() method.
+		5. We use Django's {% url %} template tag to build the URL for the
+		AJAX request.
+		6. We build the POST parameters dictionary to send in the request. These are
+		the ID and action parameters expected by our Django view. We retrieve
+		these values from the <a> element's data-id and data-action attributes.
+		7. We defne a callback function that is executed when the HTTP response is
+		received. It takes a data attribute that contains the content of the response.
+		8. We access the status attribute of the data received and check if it equals to
+		ok. If the returned data is as expected, we toggle the data-action attribute
+		of the link and its text. This allows the user to undo his action.
+		9. We increase or decrease the total likes count by one, depending on the
+		action performed.
 
 
+	2.为views自定义decorators。@require_ajax
+	 	创建如下目录：
+	 		common/
+	 			__init__.py
+	 			decorators.py
+	 	编辑decorators.py
+	 	from django.http import HttpResponseBadRequest
+		def ajax_required(f):
+			def wrap(request, *args, **kwargs):
+				if not request.is_ajax():
+					return HttpResponseBadRequest()
+				return f(request, *args, **kwargs)
+			wrap.__doc__=f.__doc__
+			wrap.__name__=f.__name__
+			return wrap
+
+十三.Adding AJAX pagination to your list views
+	基于十二导入的库
+
+	from django.http import HttpResponse
+	from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+
+	@login_required
+	def image_list(request):
+		images = Image.objects.all()
+		paginator = Paginator(images, 8)
+		page = request.GET.get('page')
+		try:
+			images = paginator.page(page)
+		except PageNotAnInteger:
+		# If page is not an integer deliver the first page
+			images = paginator.page(1)
+		except EmptyPage:
+			if request.is_ajax():
+		# If the request is AJAX and the page is out of range
+		# return an empty page
+				return HttpResponse('')
+		# If page is out of range deliver last page of results
+			images = paginator.page(paginator.num_pages)
+		if request.is_ajax():
+			return render(request,'images/image/list_ajax.html',
+							{'section': 'images', 'images': images})
+		return render(request,'images/image/list.html',
+					{'section': 'images', 'images': images})
+
+		编辑urls.py
+			url(r'^$', views.image_list, name='list'),
+		编辑list_ajax.html This template will only contain the images of the requested page.
+			
+		{% load thumbnail %}
+		{% for image in images %}
+			<div class="image">
+				<a href="{{ image.get_absolute_url }}">
+					{% thumbnail image.image "300x300" crop="100%" as im %}
+					<a href="{{ image.get_absolute_url }}">
+						<img src="{{ im.url }}">
+					</a>
+					{% endthumbnail %}
+				</a>
+				<div class="info">
+					<a href="{{ image.get_absolute_url }}" class="title">
+						{{ image.title }}
+					</a>
+				</div>
+			</div>
+		{% endfor %}
+
+		编辑list.html
+			{% extends "base.html" %}
+			{% block title %}Images bookmarked{% endblock %}
+			{% block content %}
+				<h1>Images bookmarked</h1>
+				<div id="image-list">
+					{% include "images/image/list_ajax.html" %}
+				</div>
+			{% endblock %}
+			Add the following code to the list.html template:
+			{% block domready %}
+				var page = 1;
+				var empty_page = false;
+				var block_request = false;
+				$(window).scroll(function() {
+					var margin = $(document).height() - $(window).height() - 200;
+					if ($(window).scrollTop() > margin && empty_page == false &&block_request == false) {
+						block_request = true;
+						page += 1;
+						$.get('?page=' + page, function(data) {
+							if(data == '') {
+								empty_page = true;
+							}
+							else {
+								block_request = false;
+								$('#image-list').append(data);
+							}
+						});
+					}
+				});
+			{% endblock %}
+			1. We defne the following variables:
+				° page: Stores the current page number.
+				° empty_page: Allows us to know if the user is in the last page and
+					retrieves an empty page. As soon as we get an empty page we will
+					stop sending additional AJAX requests because we will assume there
+					are no more results.
+				° block_request: Prevents from sending additional requests while an
+					AJAX request is in progress.
+			2. We use $(window).scroll() to capture the scroll event and we defne
+				a handler function for it.
+			3. We calculate the margin variable getting the difference between the total
+				document height and the window height because that's the height of the
+				remaining content for the user to scroll. We subtract a value of 200 from the
+				result so that we load the next page when the user is closer than 200 pixels
+				to the bottom of the page.
+			4. We only send an AJAX request if no other AJAX request is being done
+				(block_request has to be false) and the user didn't got to the last
+				page of results (empty_page is also false).
+			5. We set block_request to true to avoid that the scroll event triggers
+				additional AJAX requests, and we increase the page counter by one,
+				in order to retrieve the next page.
+			6. We perform an AJAX GET request using $.get() and we receive the HTML
+				response back in a variable called data. There are two scenarios:
+				° The response has no content: We got to the end of the results and
+					there are no more pages to load. We set empty_page to true
+					to prevent additional AJAX requests.
+				° The response contains data: We append the data to the HTML
+					element with the image-list id. The page content expands vertically
+					appending results when the user approaches the bottom of the page.
 
