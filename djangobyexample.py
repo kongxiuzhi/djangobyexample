@@ -220,26 +220,29 @@
 			]
 
 四.Sending email
-	from django.core.mail import send_mail
-	send_mail(subject, message, from_email, recipient_list, fail_silently=False, auth_user=None,
-				auth_password=None, connection=None, html_message=None)
+ 	1.生产环境：
+		from django.core.mail import send_mail
+		send_mail(subject, message, from_email, recipient_list, fail_silently=False, auth_user=None,
+					auth_password=None, connection=None, html_message=None)
 
-		邮箱SMTP服务器配置：【163】
-		EMAIL_HOST = 'smtp.163.com'
-		EMAIL_HOST_USER = 'xiuzhikong@163.com'
-		EMAIL_HOST_PASSWORD = '113322k'
-		EMAIL_PORT = 25
-		EMAIL_USE_TLS = True
+			邮箱SMTP服务器配置：【163】
+			EMAIL_HOST = 'smtp.163.com'
+			EMAIL_HOST_USER = 'xiuzhikong@163.com'
+			EMAIL_HOST_PASSWORD = '113322k'
+			EMAIL_PORT = 25
+			EMAIL_USE_TLS = True
 
-		#example
-			from django.core.mail import send_mail
-			send_mail(subject,message,from_mail,recipient_list,fail_silently=False,auth_user = None,auth_password =None,
-				connetcion = None,html_message =None)
-			send_mail('djanogtest','mail content is test','xiuzhikong@163.com',['xiuzhikng@163.com'])
+			#example
+				from django.core.mail import send_mail
+				send_mail(subject,message,from_mail,recipient_list,fail_silently=False,auth_user = None,auth_password =None,
+					connetcion = None,html_message =None)
+				send_mail('djanogtest','mail content is test','xiuzhikong@163.com',['xiuzhikng@163.com'])
 
-			send_mass_mail(datatupe,fail_silently ....)
-			datatupe 是一个元组 （mail1,mail2,'''）
-			'''
+				send_mass_mail(datatupe,fail_silently ....)
+				datatupe 是一个元组 （mail1,mail2,'''）
+				'''
+	2.开发环境：
+		编辑settings
 
 五.Adding tagging functionality
 	1.第三方插件
@@ -674,8 +677,7 @@
 						{% block title %}Password reset{% endblock %}
 						{% block content %}
 						<h1>Password set</h1>
-						<p>Your password has been set. You can <a href="{% url "login"
-						%}">log in now</a></p>
+						<p>Your password has been set. You can <a href="{% url "login" %}">log in now</a></p>
 						{% endblock %}
 
 	3.用户注册：
@@ -734,20 +736,43 @@
 					admin.site.register(Profile, ProfileAdmin)
 				# 复杂的方法
 					#coding:utf-8
-					from django.contrib import admin
-					from django.contrib.auth.models import User
-					from login.models import UserProfile
+					1.models.py 
+						from django.db import models
+						from django.conf import settings
+						from django.contrib.auth.models import User
+						from django.db.models.signals import post_save
+						class Profile(models.Model):
+							user = models.OneToOneField(settings.AUTH_USER_MODEL)
+							date_of_birth = models.DateField(blank=True, null=True)
+							#photo = models.ImageField(upload_to='users/%Y/%m/%d',blank=True)
 
-					# Register your models here.
-					class ProfileInline(admin.StackedInline):  #将UserProfile加入到Admin的user表中
-					    model = UserProfile
-					    verbose_name = 'profile'
+						def __str__(self):
+							return 'Profile for user {}'.format(self.user.username)
 
-					class UserProfileAdmin(admin.ModelAdmin):
-					    inlines = (ProfileInline,)
+						def create_user_profile(sender,instance,created,**kwargs):
+							if created:
+								profile = Profile()
+								profile.user = instance
+								profile.save()
+						post_save(create_user_profile,sender = User)
+					2.migrate
+					3.admin.py
 
-					admin.site.unregister(User)  #去掉在admin中的注册
-					admin.site.register(User, UserProfileAdmin)  #用userProfileAdmin注册user
+						from django.contrib import admin
+						from django.contrib.auth.models import User
+						from django.contrib.auth.admin import UserAdmin
+						from .models import Profile
+
+						# Register your models here.
+						class ProfileInline(admin.StackedInline):  #将UserProfile加入到Admin的user表中
+						    model = UserProfile
+						    verbose_name = 'profile'
+
+						class UserProfileAdmin(UserAdmin): 
+						    inlines = (ProfileInline,)
+
+						admin.site.unregister(User)  #去掉在admin中的注册
+						admin.site.register(User, UserProfileAdmin)  #用userProfileAdmin注册user
 			4.forms.py
 				from .models import Profile
 				class UserEditForm(forms.ModelForm):
@@ -854,8 +879,6 @@
 				admin.site.register(MyUser,MyUserAdmin)
 
 		3.使用AbstractBaseUser
-			
-
 八.1自定义认证和User
 	authentication backend is a class that provides the following two methods:
 	•	 authenticate(): Takes user credentials as parameters. Has to return True if the user has been successfully authenticated, or False otherwise.
@@ -884,8 +907,6 @@
 			'django.contrib.auth.backends.ModelBackend',
 			'account.authentication.EmailAuthBackend',
 			)
-
-
 
 九.message
 	from django.contrib import messages
@@ -925,3 +946,63 @@
 		</div>
 	5.配置 hosts 
 		127.0.0.1 mysite.com
+
+十一.Creating image thumbnails using sorl-thumbnail
+	1.pip install sorl-thumbnail
+	2.settings.py
+		INSTALLED_APPS=[
+			'sorl.thumbnail',
+		]
+	3.python manage.py makemigrations sorl.thumbnail
+		migrate
+	4.在模板中使用：
+		{% load thumbnail %}
+			#要显示的图片
+			{% thumbnail image.image "300x300" crop="100%" as im  %}
+				<a href ="{{ image.image.url }}">#原图链接
+					<img src="{im.url}">#用缩略图显示
+				</a>
+			{% endthumbnail %}
+
+十二.Adding AJAX actions with jquery
+
+	We are going to add a link to the image detail page to let users click it to like an
+	image. We will perform this action with an AJAX call to avoid reloading the whole
+	page. First, we are going to create a view for users to like/unlike images. Edit the
+	views.py fle of the images application and add the following code to it:
+
+	from django.http import JsonResponse
+	from django.views.decorators.http import require_POST //require_GET 等等
+	
+
+	@login_required
+	@require_POST
+	def image_like(request):
+		image_id = requset.POST.get('id')// 两个request参数
+		action = requset.POST.get('action') //不是通过URL获得数据而是requset
+		if image_id and action:
+			try:
+				image = Image.objects.get(id = iamge_id)
+				if action == "like":
+					image.users_like.add(requset.user)
+				else:
+					image.users_like.remove(requset.user)//manytomanyfield
+				return JsonResponse({'status':'ok'}) // AJAX 根据status的值判断是否成功
+			except:
+				pass
+			return JsonResponse({"status":'ko'})
+
+	2.url.py
+		url(r'^like/$', views.image_like, name='like'),//仅仅是一个链接
+	3.在模板中加载jquery.min.js,
+		<script src="{% static "js/jquery.mim.js" %}"></script>
+		<script>
+			$(document).ready(function(){
+				{% block domready %}
+				{% endblock %}
+				});
+				
+		</script>
+
+
+
